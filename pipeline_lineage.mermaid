@@ -1,0 +1,112 @@
+flowchart TD
+    subgraph Sources["External Sources"]
+        SD["B2B Distributor\n(CSV exports)"]
+        BC["D2C Platform A\n(Browser automation)"]
+        SQ["D2C Platform B\n(API)"]
+        SX["Performance Rights Org\n(CSV statements)"]
+        ST["Publishing Admin\n(CSV statements)"]
+        QB["Accounting System\n(API — 12 endpoints)"]
+    end
+
+    subgraph Bronze["Bronze Layer — Raw Ingest"]
+        B_SD["distributor_digital\ndistributor_physical\ndistributor_chargebacks\ndistributor_warehousing\ndistributor_stockout\ndistributor_ship\ndistributor_summary"]
+        B_BC["platform_a_sales\nplatform_a_payouts"]
+        B_SQ["platform_b_orders\nplatform_b_transactions"]
+        B_SX["perf_rights_statements"]
+        B_ST["pub_admin_statements"]
+        B_QB["erp_sales_receipts\nerp_expenses\nerp_deposits\nerp_invoices\nerp_products\nerp_classes"]
+    end
+
+    subgraph Meta["Metadata & Reference"]
+        M_SKU["SKU Crosswalk\n(multi-source lookup)"]
+        M_FMT["Format Specs\n(GL routing rules)"]
+        M_RATE["Mechanical Rates\n(statutory schedule)"]
+        M_HIER["Account Hierarchy\n(P&L grouping)"]
+        M_CONTRACT["Artist Contracts\n(royalty terms)"]
+    end
+
+    subgraph Silver["Silver Layer — Reconciled Accounting Logic"]
+        S_SD["silver_distributor_digital\nsilver_distributor_physical\nsilver_distributor_neighboring_rights\nsilver_distributor_fees"]
+        S_BC["silver_platform_a"]
+        S_SQ["silver_platform_b"]
+        S_SX["silver_perf_rights"]
+        S_ST["silver_pub_admin"]
+        S_QB["silver_erp_native_income\nsilver_erp_native_expenses"]
+    end
+
+    NOTE_S["Silver — Label Accounting Logic:\n• Advance paydown recognition\n  (deferred revenue → earned)\n• M&D flow-throughs\n  (capitalized costs → bill paydown)\n• Chargebacks as contra-revenue\n  (negative SRs, not expenses)\n• Recoupable expense classification\n• TEA/SEA unit conversions\n  (streams ÷1,250 · tracks ÷10)\n• Multi-pass SKU resolution\n  (with manual override queue)\n• GL account derivation"]
+    style NOTE_S fill:#ffffcc,stroke:#cccc00
+
+    subgraph Push["ERP Push Layer"]
+        P["API push to Accounting System\n(Sales Receipts, Refund Receipts,\nDeferred Revenue offsets,\nM&D capitalized expense bill paydowns)"]
+    end
+
+    subgraph Gold["Gold Layer — Aggregation, Cross-Collateralization, and JV/Recoup-Specific Analytics & Reporting"]
+        G_BASE["gold_royalty_base\n(lean unified fact — 21 cols)"]
+        G_MECH["gold_mechanicals\n(statutory royalty calcs)"]
+        G_EXP["gold_erp_expenses\n(recoupable costs)"]
+        G_META["gold_metadata\n(canonical product spine)"]
+        G_RECOUP["gold_recoup_agg\n(single source of truth\nfor all recoup calcs)"]
+        G_STMT["gold_recoup_statement\n(per-period with BCF frame)"]
+    end
+
+    NOTE_G["Gold — Recoup & Reporting:\n• JV profit-share accounting\n  (full P&L split vs royalty rate)\n• Per-row contribution columns\n  (admin fees, net receipts,\n  artist's share, amounts due)\n• Account hierarchy (4-level)\n• Artist contract terms\n• Balance carried forward"]
+    style NOTE_G fill:#ffffcc,stroke:#cccc00
+
+    subgraph Recon["Reconciliation"]
+        R["Dedicated royalty source\nclearing account reconciliation\n(pipeline vs bank transfers\nper source per period)"]
+    end
+
+    %% Source → Bronze
+    SD --> B_SD
+    BC --> B_BC
+    SQ --> B_SQ
+    SX --> B_SX
+    ST --> B_ST
+    QB --> B_QB
+
+    %% Bronze → Silver
+    B_SD --> S_SD
+    B_BC --> S_BC
+    B_SQ --> S_SQ
+    B_SX --> S_SX
+    B_ST --> S_ST
+    B_QB --> S_QB
+
+    %% Metadata → Silver
+    M_SKU --> S_SD
+    M_SKU --> S_BC
+    M_SKU --> S_SQ
+    M_FMT --> S_SD
+    M_FMT --> S_BC
+    M_FMT --> S_SQ
+
+    %% Silver → Push
+    S_SD --> P
+    S_BC --> P
+    S_SQ --> P
+    S_SX --> P
+    S_ST --> P
+
+    %% Silver → Gold
+    S_SD --> G_BASE
+    S_BC --> G_BASE
+    S_SQ --> G_BASE
+    S_SX --> G_BASE
+    S_ST --> G_BASE
+    S_QB --> G_BASE
+    S_QB --> G_EXP
+
+    %% Gold internal
+    G_BASE --> G_RECOUP
+    G_MECH --> G_RECOUP
+    G_EXP --> G_RECOUP
+    G_META --> G_RECOUP
+    M_HIER --> G_RECOUP
+    M_CONTRACT --> G_RECOUP
+    G_BASE --> G_MECH
+    M_RATE --> G_MECH
+    G_RECOUP --> G_STMT
+
+    %% Push → Recon
+    P --> R
